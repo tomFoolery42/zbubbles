@@ -113,6 +113,9 @@ pub fn init(alloc: std.mem.Allocator, contacts: *internal.Contacts, ui_queue: *Q
 pub fn deinit(self: *Ui) void {
     self.typing_notice.stop(self.active_chat.?.guid) catch {};
     self.model.deinit();
+    for (self.chats.items) |*next| {
+        next.deinit();
+    }
     self.chats.deinit();
 }
 

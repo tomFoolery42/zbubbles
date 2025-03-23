@@ -90,6 +90,12 @@ pub const Chat = struct {
         };
     }
 
+    pub fn deinit(self: *Chat) void {
+        for (self.messages.items) |*next| {
+            next.deinit();
+        }
+    }
+
     pub fn hasUnread(self: Chat) bool {
         for (self.messages.items) |message| {
             if (message.read == false) {
