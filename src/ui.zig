@@ -64,6 +64,7 @@ const EventLoop = vaxis.Loop(Event);
 pub const Queue = MessageQueue(*Event, 1000);
 const Widget = vxfw.Widget;
 const TYPING_TIMEOUT: i64 = std.time.ns_per_s * 5;
+const MINUTES_5: u64 = 5 * 60 * 1000;
 
 pub const Ui = @This();
 
@@ -224,7 +225,8 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                                     if (next_chat == self.active_chat) {
                                         const last_sender = if (next_chat.messages.items.len > 1) next_chat.messages.items[next_chat.messages.items.len - 2].contact.display_name else "";
                                         const needs_label = std.mem.eql(u8, last_sender, message.contact.display_name) == false;
-                                        try self.model.messageAdd(message, needs_label);
+                                        const needs_time = next_chat.messages.items[next_chat.messages.items.len - 2].date_created - message.date_created > MINUTES_5;
+                                        try self.model.messageAdd(message, needs_label,needs_time);
                                         if (message.from_me == false) {
                                             const read = try self.alloc.create(client.Event);
                                             read.* = .{.Read = next_chat.guid};

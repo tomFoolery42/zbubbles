@@ -15,6 +15,7 @@ const WHITE: vaxis.Cell.Color = .{.rgb = .{255, 255, 255}};
 const input_winow_split = 0.8;
 const split_split = 0.1;
 const main_window_split = 0.93;
+const MINUTES_5: u64 = 5 * 60 * 1000;
 
 fn scale(max: u16, scaler: f32) u16 {
     const max_float: f32 = @floatFromInt(max);
@@ -166,18 +167,26 @@ pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
     self.messages_list.clearRetainingCapacity();
 
     for (chat.messages.items, 0..chat.messages.items.len) |message, index| {
-        const last_message_sender = if (index > 0) chat.messages.items[index-1].contact.display_name else "";
-        const needs_label = std.mem.eql(u8, last_message_sender, message.contact.display_name) == false;
-        try self.messageAdd(message, needs_label);
+        var last_message_sender: []const u8 = "";
+        var needs_label = true;
+        var needs_time = true;
+        if (index > 0) {
+            last_message_sender = chat.messages.items[index-1].contact.display_name;
+            needs_label = std.mem.eql(u8, last_message_sender, message.contact.display_name) == false;
+            needs_time = message.date_created - chat.messages.items[index-1].date_created > MINUTES_5;
+        }
+        try self.messageAdd(message, needs_label, needs_time);
     }
 
     // view cursor handled by message add
 }
 
-pub fn messageAdd(self: *Model, new_message: internal.Message, needs_label: bool) !void {
+pub fn messageAdd(self: *Model, new_message: internal.Message, needs_label: bool, needs_time: bool) !void {
     if (needs_label == true) {
         try self.messages_list.append(Buffer());
-        try self.messages_list.append(Buffer());
+        if (needs_time == true) {
+            try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = new_message.date_time, .text_align = .center}});
+        }
         try self.messages_list.append(Label(new_message.from_me, new_message.contact));
     }
 
