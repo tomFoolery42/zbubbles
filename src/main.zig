@@ -13,7 +13,16 @@ const Config = struct {
     password:       []const u8,
 };
 
-fn config_load(alloc: std.mem.Allocator, config_file: []const u8) !std.json.Parsed(Config) {
+fn config_load(alloc: std.mem.Allocator) !std.json.Parsed(Config) {
+    return _config_load(alloc, "config.json") catch {
+        const home = std.posix.getenv("HOME").?;
+        const path = try std.fmt.allocPrint(alloc, "{s}/.config/zbubbles/config.json", .{home});
+        defer alloc.free(path);
+        return try _config_load(alloc, path);
+    };
+}
+
+fn _config_load(alloc: std.mem.Allocator, config_file: []const u8) !std.json.Parsed(Config) {
     var file = try std.fs.cwd().openFile(config_file, .{});
     defer file.close();
 
@@ -88,7 +97,6 @@ pub fn main() !void {
         .child_allocator = gpa.allocator(),
     };
     const alloc = thread_safe_arena.allocator();
-//    const alloc = gpa.allocator();
 
     var ui_queue = ui.Queue.init();
     defer ui_queue.deinit();
@@ -96,7 +104,7 @@ pub fn main() !void {
     defer sync_queue.deinit();
     errdefer sync_queue.deinit();
 
-    const config = try config_load(alloc, "config.json");
+    const config = try config_load(alloc); //, "~/.config/zbubbles/config.json") catch try config_load(alloc, "./config.json");
     defer config.deinit();
     var contacts = try contacts_load(alloc, config.value.contacts_file);
     defer contacts.deinit();

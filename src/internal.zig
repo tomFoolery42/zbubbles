@@ -125,6 +125,7 @@ pub const Contact = struct {
 };
 
 pub const Message = struct {
+    date_time:      []const u8,
     alloc:          std.mem.Allocator,
     attachments:    []Attachment,
     contact:        *Contact,
@@ -144,14 +145,15 @@ pub const Message = struct {
         }
 
         return .{
-            .alloc = alloc,
-            .attachments = try Attachment.from(alloc, message.attachments),
-            .contact = contact,
-            .date_created = message.dateCreated,
-            .from_me = message.isFromMe,
-            .guid = try alloc.dupe(u8, message.guid),
-            .read = true,
-            .text = try alloc.dupe(u8, message.text),
+            .date_time      = "Some datetime",
+            .alloc          = alloc,
+            .attachments    = try Attachment.from(alloc, message.attachments),
+            .contact        = contact,
+            .date_created   = message.dateCreated,
+            .from_me        = message.isFromMe,
+            .guid           = try alloc.dupe(u8, message.guid),
+            .read           = true,
+            .text           = try alloc.dupe(u8, message.text),
         };
     }
 

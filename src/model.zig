@@ -1,5 +1,5 @@
 const Button = @import("button.zig").Button;
-const Image = @import("image.zig").Image;
+//const Image = @import("image.zig").Image;
 const internal = @import("internal.zig");
 const VirticalView = @import("virtical.zig").VirticalView;
 
@@ -15,6 +15,7 @@ const WHITE: vaxis.Cell.Color = .{.rgb = .{255, 255, 255}};
 const input_winow_split = 0.8;
 const split_split = 0.1;
 const main_window_split = 0.93;
+const MINUTES_5: u64 = 5 * 60 * 1000;
 
 fn scale(max: u16, scaler: f32) u16 {
     const max_float: f32 = @floatFromInt(max);
@@ -24,10 +25,68 @@ fn scale(max: u16, scaler: f32) u16 {
 pub const Model = @This();
 
 const MessageType = union(enum) {
+    Buffer:     vxfw.Text,
+    Label:      vxfw.Text,
     Text:       vxfw.Text,
     Image:      vxfw.Text,
     Reaction:   vxfw.Text,
 };
+
+fn Label(from_me: bool, contact: *internal.Contact) MessageType {
+    if (from_me == true) {
+        return .{
+            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = contact.display_name, .text_align = .right},
+        };
+    }
+    else {
+        return .{
+            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = contact.display_name, .text_align = .left},
+        };
+    }
+}
+fn Text(from_me: bool, text: []const u8) MessageType {
+    if (from_me == true) {
+        return .{
+            .Text = .{.style = .{.bg = BLUE, .fg = WHITE}, .text = text, .text_align = .right},
+//            .Text = .{
+//                .text = &.{
+//                    .{.style = .{.bg = BLUE, .fg = WHITE}, .text = text},
+//                    .{.style = .{.bg = BLACK, .fg = BLACK}, .text = "     "},
+//                },
+//                .text_align = .right,
+//            },
+        };
+    }
+    else {
+        return .{
+            .Text = .{.style = .{.bg = GRAY, .fg = WHITE}, .text = text, .text_align = .left},
+//            .Text = .{
+//                .text = &.{
+//                    .{.style = .{.bg = GRAY, .fg = WHITE}, .text = text},
+//                    .{.style = .{.bg = BLACK, .fg = BLACK}, .text  = "     "},
+//                },
+//                .text_align = .left,
+//            },
+        };
+    }
+}
+fn Image(from_me: bool) MessageType {
+    if (from_me == true) {
+        return .{
+            .Image = .{.style = .{.bg = BLUE, .fg = WHITE}, .text  = "<==Image==>", .text_align = .right},
+        };
+    }
+    else {
+        return .{
+            .Image = .{.style = .{.bg = GRAY, .fg = WHITE}, .text  = "<==Image==>", .text_align = .left},
+        };
+    }
+}
+fn Buffer() MessageType {
+    return .{
+        .Buffer = .{.style = .{.bg = BLACK, .fg = BLACK}, .text = "     "},
+    };
+}
 
 alloc:              std.mem.Allocator,
 chats_side_list:    std.ArrayList(vxfw.Text),
@@ -107,30 +166,38 @@ pub fn resize(self: *Model, winsize: vaxis.Winsize) !void {
 pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
     self.messages_list.clearRetainingCapacity();
 
-    for (chat.messages.items) |message| {
-        try self.messageAdd(message);
+    for (chat.messages.items, 0..chat.messages.items.len) |message, index| {
+        var last_message_sender: []const u8 = "";
+        var needs_label = true;
+        var needs_time = true;
+        if (index > 0) {
+            last_message_sender = chat.messages.items[index-1].contact.display_name;
+            needs_label = std.mem.eql(u8, last_message_sender, message.contact.display_name) == false;
+            needs_time = message.date_created - chat.messages.items[index-1].date_created > MINUTES_5;
+        }
+        try self.messageAdd(message, needs_label, needs_time);
     }
 
     // view cursor handled by message add
 }
 
-pub fn messageAdd(self: *Model, new_message: internal.Message) !void {
-    for (new_message.attachments) |attachment| {
-        _ = attachment;
-        if (new_message.from_me == true) {
-            try self.messages_list.append(.{.Image = .{.style = .{.bg = BLUE, .fg = WHITE}, .text  = "<==Image==>", .text_align = .right}});
+pub fn messageAdd(self: *Model, new_message: internal.Message, needs_label: bool, needs_time: bool) !void {
+    if (needs_label == true) {
+        try self.messages_list.append(Buffer());
+        if (needs_time == true) {
+            try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = new_message.date_time, .text_align = .center}});
         }
-        else {
-            try self.messages_list.append(.{.Image = .{.style = .{.bg = GRAY, .fg = WHITE}, .text = "<==Image==>", .text_align = .left}});
-        }
+        try self.messages_list.append(Label(new_message.from_me, new_message.contact));
     }
 
-    if (new_message.from_me == true) {
-        try self.messages_list.append(.{.Text = .{.style = .{.bg = BLUE, .fg = WHITE}, .text = new_message.text, .text_align = .right}});
+    for (new_message.attachments) |attachment| {
+        _ = attachment;
+        try self.messages_list.append(Image(new_message.from_me));
     }
-    else {
-        try self.messages_list.append(.{.Text = .{.style = .{.bg = GRAY, .fg = WHITE}, .text = new_message.text, .text_align = .left}});
-    }
+
+    try self.messages_list.append(Text(new_message.from_me, new_message.text));
+
+
     self.messages_view.cursor = @intCast(self.messages_list.items.len - 1);
     self.messages_view.ensureScroll();
 }
@@ -140,6 +207,8 @@ fn messageListBuilder(ptr: *const anyopaque, idx: usize, _: usize) ?vxfw.Widget 
     if (idx >= self.messages_list.items.len) return null;
 
     return switch (self.messages_list.items[idx]) {
+        .Buffer     => |*buffer| buffer.widget(),
+        .Label      => |*label| label.widget(),
         .Text       => |*text| text.widget(),
         .Image      => |*image| image.widget(),
         .Reaction   => |*reaction| reaction.widget(),
