@@ -1,3 +1,4 @@
+const time = @import("time.zig");
 const schema = @import("schema.zig");
 
 const std = @import("std");
@@ -125,8 +126,8 @@ pub const Contact = struct {
 };
 
 pub const Message = struct {
-    date_time:      []const u8,
     alloc:          std.mem.Allocator,
+    date_time:      time.DateTime,
     attachments:    []Attachment,
     contact:        *Contact,
     date_created:   u64,
@@ -145,8 +146,8 @@ pub const Message = struct {
         }
 
         return .{
-            .date_time      = "Some datetime",
             .alloc          = alloc,
+            .date_time      = try time.fromApple(alloc, message.dateCreated),
             .attachments    = try Attachment.from(alloc, message.attachments),
             .contact        = contact,
             .date_created   = message.dateCreated,
