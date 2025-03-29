@@ -185,7 +185,7 @@ pub fn messageAdd(self: *Model, new_message: internal.Message, needs_label: bool
     if (needs_label == true) {
         try self.messages_list.append(Buffer());
         if (needs_time == true) {
-            try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = new_message.date_time, .text_align = .center}});
+            try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = new_message.date_time.as_str(), .text_align = .center}});
         }
         try self.messages_list.append(Label(new_message.from_me, new_message.contact));
     }
