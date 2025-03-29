@@ -26,10 +26,10 @@ pub const Model = @This();
 
 const MessageType = union(enum) {
     Buffer:     vxfw.Text,
-    Label:      vxfw.Text,
-    Text:       vxfw.Text,
     Image:      vxfw.Text,
+    Label:      vxfw.Text,
     Reaction:   vxfw.Text,
+    Text:       vxfw.Text,
 };
 
 fn Label(from_me: bool, contact: *internal.Contact) MessageType {
@@ -110,8 +110,8 @@ pub fn init(alloc: std.mem.Allocator) !*Model {
         .chats_side_list    = try std.ArrayList(vxfw.Text).initCapacity(alloc, 20),
         .input              = vxfw.TextField.init(alloc, ucd),
         .input_window       = .{.lhs = undefined, .rhs = undefined, .width = 50},
-        .messages_list      = try std.ArrayList(MessageType).initCapacity(alloc, 1500),
-        .messages_view      = .{.children = .{.builder = vxfw.ListView.Builder{.userdata = model, .buildFn = Model.messageListBuilder}}},
+        .messages_list      = try std.ArrayList(MessageType).initCapacity(alloc, 2000),
+        .messages_view      = .{.children = .{.builder = .{.userdata = model, .buildFn = Model.messageListBuilder}}},
         .send               = .{.label = "Send", .onClick = undefined, .userdata = undefined, .style = .{.default = .{.bg = BLUE}}},
         .main_split         = .{.lhs = undefined, .rhs = undefined, .width = 30},
         .chats_side_view    = .{.children = .{.builder = vxfw.ListView.Builder{.userdata = model, .buildFn = Model.chatListBuilder}}},
@@ -160,11 +160,11 @@ pub fn resize(self: *Model, winsize: vaxis.Winsize) !void {
     self.main_window.height = scale(winsize.rows, main_window_split);
     self.main_split.width = scale(winsize.cols, split_split);
     self.input_window.width = scale(winsize.cols, input_winow_split);
-
 }
 
 pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
     self.messages_list.clearRetainingCapacity();
+    try self.messages_list.ensureTotalCapacity(chat.messages.items.len);
 
     for (chat.messages.items, 0..chat.messages.items.len) |message, index| {
         var last_message_sender: []const u8 = "";
@@ -208,10 +208,10 @@ fn messageListBuilder(ptr: *const anyopaque, idx: usize, _: usize) ?vxfw.Widget 
 
     return switch (self.messages_list.items[idx]) {
         .Buffer     => |*buffer| buffer.widget(),
-        .Label      => |*label| label.widget(),
-        .Text       => |*text| text.widget(),
         .Image      => |*image| image.widget(),
+        .Label      => |*label| label.widget(),
         .Reaction   => |*reaction| reaction.widget(),
+        .Text       => |*text| text.widget(),
     };
 }
 
