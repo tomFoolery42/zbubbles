@@ -1,7 +1,7 @@
-const time = @import("time.zig");
 const schema = @import("schema.zig");
 
 const std = @import("std");
+const zig_time = @import("zig-time");
 
 
 pub const Allocator = struct {
@@ -17,7 +17,9 @@ fn contactFind(alloc: std.mem.Allocator, contacts: *Contacts, participant: schem
         }
     }
 
-    try contacts.append(.{.display_name = try alloc.dupe(u8, participant.address), .number = try alloc.dupe(u8, participant.address)});
+    const display_name = if (participant.address.len > 0) participant.address else "invalid display name";
+
+    try contacts.append(.{.display_name = try alloc.dupe(u8, display_name), .number = try alloc.dupe(u8, participant.address)});
     return &contacts.items[contacts.items.len - 1];
 }
 
@@ -127,7 +129,7 @@ pub const Contact = struct {
 
 pub const Message = struct {
     alloc:          std.mem.Allocator,
-    date_time:      time.DateTime,
+    date_time:      zig_time.Time,
     attachments:    []Attachment,
     contact:        *Contact,
     date_created:   u64,
@@ -147,7 +149,7 @@ pub const Message = struct {
 
         return .{
             .alloc          = alloc,
-            .date_time      = try time.fromApple(alloc, message.dateCreated),
+            .date_time      = zig_time.Time.fromMilliTimestamp(@intCast(message.dateCreated)).setLoc(zig_time.Location.create(-(5 * 60), "CDT")),
             .attachments    = try Attachment.from(alloc, message.attachments),
             .contact        = contact,
             .date_created   = message.dateCreated,

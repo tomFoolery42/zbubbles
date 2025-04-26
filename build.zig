@@ -26,6 +26,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
     const httpz = b.dependency("httpz", .{.target = target, .optimize = optimize});
     exe.root_module.addImport("httpz", httpz.module("httpz"));
+    const zig_time_dep = b.dependency("zig-time", .{});
+    exe.root_module.addImport("zig-time", zig_time_dep.module("zig-time"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

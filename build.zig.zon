@@ -29,8 +29,12 @@
             .hash = "httpz-0.0.0-PNVzrJSuBgDFvO7mtd2qDzaq8_hXIu1BqFuL1jwAV8Ac",
         },
         .vaxis = .{
-            .url = "git+https://github.com/rockorager/libvaxis.git?ref=zig-0.14.0#df1dbaa71a57692f6eb8ad54165795f4acfe5f72",
-            .hash = "vaxis-0.1.0-BWNV_PPxCAD381DWhYnaE-tDEDtzNJQHNZDrv7Of_SRQ",
+            .url = "git+https://github.com/rockorager/libvaxis.git?ref=main#6a07aa7e3745d32af79c6cd86f4871910b5e6060",
+            .hash = "vaxis-0.1.0-BWNV_MkMCQC5L6gqogtruEXEgj4jyZjpvqHzJ_44-UA7",
+        },
+        .@"zig-time" = .{
+            .url = "git+https://github.com/deatil/zig-time?ref=main#8e8e5d6e9ab218fdad660b485d92073892097411",
+            .hash = "zig_time-1.0.15-FD_-CmKfAQAyCNpd_zTknuLfqICbphDXTG69tW1pE8k1",
         },
     },
     .paths = .{
