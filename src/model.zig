@@ -15,7 +15,7 @@ const WHITE: vaxis.Cell.Color = .{.rgb = .{255, 255, 255}};
 const input_winow_split = 0.8;
 const split_split = 0.1;
 const main_window_split = 0.93;
-const MINUTES_5: u64 = 5 * 60 * 1000;
+const MINUTES_5: u64 = 5 * 60 * 10000;
 
 fn scale(max: u16, scaler: f32) u16 {
     const max_float: f32 = @floatFromInt(max);

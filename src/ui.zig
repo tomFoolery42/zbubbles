@@ -68,8 +68,9 @@ const MINUTES_5: u64 = 5 * 60 * 1000;
 
 pub const Ui = @This();
 
-active_chat:    ?*internal.Chat,
 alloc:          std.mem.Allocator,
+active_chat:    ?*internal.Chat,
+asset_path:     []const u8,
 chats:          std.ArrayList(internal.Chat),
 children:       [1]vxfw.SubSurface = undefined,
 contacts:       *internal.Contacts,
@@ -98,9 +99,10 @@ fn containsMessage(list: *internal.Chat, new_guid: []const u8) bool {
     return false;
 }
 
-pub fn init(alloc: std.mem.Allocator, contacts: *internal.Contacts, ui_queue: *Queue, sync_queue: *client.Queue) !Ui {
+pub fn init(alloc: std.mem.Allocator, asset_path: []const u8, contacts: *internal.Contacts, ui_queue: *Queue, sync_queue: *client.Queue) !Ui {
     return .{
         .alloc          = alloc,
+        .asset_path     = asset_path,
         .contacts       = contacts,
         .model          = try Model.init(alloc),
         .ui_queue       = ui_queue,
@@ -207,7 +209,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
         },
         .app => |user_event| {
             const queue_event: *Event = @constCast(@ptrCast(@alignCast(user_event.data)));
-//                defer self.alloc.destroy(queue_event);
+                defer self.alloc.destroy(queue_event);
                 switch (queue_event.*) {
                     .Chat => |new_chat| {
                         try self.chats.append(try internal.Chat.from(self.alloc, new_chat, self.contacts));

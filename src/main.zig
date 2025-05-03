@@ -8,6 +8,7 @@ const std = @import("std");
 
 
 const Config = struct {
+    asset_path:     []const u8,
     host:           []const u8,
     contacts_file:  []const u8,
     password:       []const u8,
@@ -109,7 +110,7 @@ pub fn main() !void {
     var contacts = try contacts_load(alloc, config.value.contacts_file);
     defer contacts.deinit();
 
-    var interface = try ui.Ui.init(alloc, &contacts, &ui_queue, &sync_queue);
+    var interface = try ui.Ui.init(alloc, config.value.asset_path, &contacts, &ui_queue, &sync_queue);
     defer interface.deinit();
     var sync = try client.Sync.init(alloc, config.value.host, config.value.password, &contacts, &ui_queue, &sync_queue);
     defer sync.deinit();
