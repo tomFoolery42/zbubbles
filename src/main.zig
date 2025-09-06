@@ -53,10 +53,11 @@ fn data_sync(alloc: Allocator, sync: *client.Sync, ui_queue: *ui.Queue, sync_que
     var running = true;
     try sync.initialSync();
     var webhook = try Webhook.init(alloc, ui_queue);
-    defer webhook.deinit();
-
     var webhook_handle = try std.Thread.spawn(.{}, webhook_listen, .{&webhook});
-    defer webhook_handle.join();
+    defer {
+        webhook.deinit();
+        webhook_handle.join();
+    }
 
     while (running) {
         if (sync_queue.get()) |event| {

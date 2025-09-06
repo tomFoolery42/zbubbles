@@ -45,10 +45,10 @@ pub fn init(base: Allocator, host: String, password: String, contacts: *internal
 }
 
 pub fn deinit(self: *Sync) void {
-    _ = self;
+    self.log.close();
 }
 
-fn chatsGet(self: *Sync) ![]schema.Chat {
+fn chatsGet(self: *Sync) !schema.Response([]schema.Chat) {
     const chat_url = try std.fmt.allocPrint(self.alloc, "{s}/{s}?password={s}", .{self.host, CHAT_REQUEST, self.password});
     defer self.alloc.free(chat_url);
     const url = try std.Uri.parse(chat_url);
@@ -69,15 +69,18 @@ fn chatsGet(self: *Sync) ![]schema.Chat {
     try request.wait();
     const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
     defer self.alloc.free(json);
+    try self.log.writer().print("chats: {s}\n", .{json});
     const chats = try std.json.parseFromSliceLeaky(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
 
-    return chats.data;
+    return chats;
 }
 
 pub fn initialSync(self: *Sync) !void {
-    for (try self.chatsGet()) |*chat| {
+    const response = try self.chatsGet();
+    defer self.alloc.destroy(&response);
+    for (response.data) |chat| {
         const new_event = try self.alloc.create(ui.Event);
-        new_event.* = .{.Chat = chat.*};
+        new_event.* = .{.Chat = chat};
         try self.ui_queue.put(new_event);
 
         if (self.messagesGet(chat.guid, null)) |messages| {
@@ -94,13 +97,13 @@ pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) ![]schema.Messag
         self.host,
         guid,
         self.password,
-        10,
+        1000,
         after+1,
     }) else try std.fmt.allocPrint(self.alloc, "{s}/chat/{s}/message?password={s}&limit={d}", .{ //&with=attachment", .{
         self.host,
         guid,
         self.password,
-        10,
+        1000,
     });
     defer self.alloc.free(chat_request);
     const url = try std.Uri.parse(chat_request);

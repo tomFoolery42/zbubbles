@@ -29,8 +29,8 @@
             .hash = "httpz-0.0.0-PNVzrJSuBgDFvO7mtd2qDzaq8_hXIu1BqFuL1jwAV8Ac",
         },
         .vaxis = .{
-            .url = "git+https://github.com/rockorager/libvaxis.git?ref=main#6a07aa7e3745d32af79c6cd86f4871910b5e6060",
-            .hash = "vaxis-0.1.0-BWNV_MkMCQC5L6gqogtruEXEgj4jyZjpvqHzJ_44-UA7",
+            .url = "git+https://github.com/rockorager/libvaxis.git#de4f564ba281e9ed4df65834d00727d88f56632b",
+            .hash = "vaxis-0.5.1-BWNV_JIWCQAoX8lZ-5eLf-sFzA-h7aXvNNEenyC2b83s",
         },
         .@"zig-time" = .{
             .url = "git+https://github.com/deatil/zig-time?ref=main#8e8e5d6e9ab218fdad660b485d92073892097411",

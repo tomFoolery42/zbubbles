@@ -16,7 +16,6 @@ pub const Event = union(enum) {
     Message:        schema.Message,
     Quit,
 };
-
 const TypingNotice = struct {
     alloc:  std.mem.Allocator,
     active: bool,
@@ -71,9 +70,10 @@ pub const Ui = @This();
 alloc:          std.mem.Allocator,
 active_chat:    ?*internal.Chat,
 asset_path:     []const u8,
-chats:          std.ArrayList(internal.Chat),
+chats:          std.ArrayList(*internal.Chat),
 children:       [1]vxfw.SubSurface = undefined,
 contacts:       *internal.Contacts,
+log:            std.fs.File,
 model:          *Model,
 ui_queue:       *Queue,
 sync_queue:     *client.Queue,
@@ -103,20 +103,22 @@ pub fn init(alloc: std.mem.Allocator, asset_path: []const u8, contacts: *interna
     return .{
         .alloc          = alloc,
         .asset_path     = asset_path,
+        .chats          = try std.ArrayList(*internal.Chat).initCapacity(alloc, 50),
         .contacts       = contacts,
         .model          = try Model.init(alloc),
+        .log            = try std.fs.cwd().createFile("ui.log", .{}),
         .ui_queue       = ui_queue,
         .sync_queue     = sync_queue,
-        .chats          = try std.ArrayList(internal.Chat).initCapacity(alloc, 50),
         .active_chat    = null,
         .typing_notice  = TypingNotice.init(alloc, sync_queue),
     };
 }
 
 pub fn deinit(self: *Ui) void {
+    self.log.close();
     self.typing_notice.stop(self.active_chat.?.guid) catch {};
     self.model.deinit();
-    for (self.chats.items) |*next| {
+    for (self.chats.items) |next| {
         next.deinit();
     }
     self.chats.deinit();
@@ -164,7 +166,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                     try self.typing_notice.stop(active_chat.guid);
 
                     self.model.chats_side_view.prevItem(ctx);
-                    self.active_chat.? = &self.chats.items[self.model.chats_side_view.cursor];
+                    self.active_chat.? = self.chats.items[self.model.chats_side_view.cursor];
                     try self.model.mainChatRebuild(self.active_chat.?);
                     self.active_chat.?.has_new = false;
 
@@ -178,7 +180,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                     try self.typing_notice.stop(active_chat.guid);
 
                     self.model.chats_side_view.nextItem(ctx);
-                    self.active_chat.? = &self.chats.items[self.model.chats_side_view.cursor];
+                    self.active_chat.? = self.chats.items[self.model.chats_side_view.cursor];
                     try self.model.mainChatRebuild(self.active_chat.?);
                     self.active_chat.?.has_new = false;
 
@@ -212,60 +214,68 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                 defer self.alloc.destroy(queue_event);
                 switch (queue_event.*) {
                     .Chat => |new_chat| {
-                        try self.chats.append(try internal.Chat.init(self.alloc, new_chat, self.contacts));
-                        try self.model.chatListAdd(self.chats.items[self.chats.items.len - 1]);
+                        try self.log.writer().print("got new chat: {s}\n", .{new_chat.displayName});
+                        const chat = try internal.Chat.init(self.alloc, new_chat, self.contacts);
+                        try self.chats.append(chat);
+                        try self.model.chatListAdd(chat);
                         if (self.active_chat == null) {
-                            self.active_chat = &self.chats.items[self.chats.items.len - 1];
-                            try ctx.setTitle(self.active_chat.?.display_name);
+                            self.active_chat = chat;
+                            try ctx.setTitle(chat.display_name);
                         }
                         ctx.redraw = true;
 
                     },
                     .Message => |new_message| {
-                        for (self.chats.items) |*next_chat| {
-                            if (new_message.chats.len > 0 and std.mem.eql(u8, next_chat.guid, new_message.chats[0].guid) and containsMessage(next_chat, new_message.guid) == false) {
-                                if (containsMessage(next_chat, new_message.guid) == false) {
-                                    const message = try internal.Message.init(self.alloc, new_message, self.contacts, &.{});
-                                    try next_chat.messages.append(message);
-                                    if (next_chat == self.active_chat) {
-                                        const last_sender = if (next_chat.messages.items.len > 1) next_chat.messages.items[next_chat.messages.items.len - 2].contact.display_name else "";
-                                        const needs_label = std.mem.eql(u8, last_sender, message.contact.display_name) == false;
-                                        const needs_time = next_chat.messages.items[next_chat.messages.items.len - 2].date_created - message.date_created > MINUTES_5;
-                                        try self.model.messageAdd(message, needs_label,needs_time);
-                                        if (message.from_me == false) {
-                                            const read = try self.alloc.create(client.Event);
-                                            read.* = .{.Read = next_chat.guid};
-                                            try self.sync_queue.put(read);
-                                        }
-                                    }
-                                    else {
-                                        next_chat.has_new = true;
-                                    }
-                                    ctx.redraw = true;
+                        for (self.chats.items) |next_chat| {
+                            if (
+                                new_message.chats.len > 0 and 
+                                std.mem.eql(u8, next_chat.guid, new_message.chats[0].guid) and
+                                containsMessage(next_chat, new_message.guid) == false)
+                            {
+                                const message = try internal.Message.init(self.alloc, new_message, self.contacts, &.{});
+                                try next_chat.messages.append(message);
+                                if (next_chat == self.active_chat) {
+                                    const last_sender =
+                                        if (next_chat.messages.items.len > 0) next_chat.messages.items[next_chat.messages.items.len - 1].contact.display_name
+                                        else "unnamed";
+                                    const needs_label = std.mem.eql(u8, last_sender, message.contact.display_name) == false;
+                                    const needs_time = next_chat.messages.items[next_chat.messages.items.len - 2].date_created - message.date_created > MINUTES_5;
+                                    try self.model.messageAdd(message, needs_label,needs_time);
                                     if (message.from_me == false) {
-                                        _ = try std.process.Child.run(.{ .argv = &.{"mpv", "assets/Blow.aiff", "&"}, .allocator = self.alloc });
+                                        const read = try self.alloc.create(client.Event);
+                                        read.* = .{.Read = next_chat.guid};
+                                        try self.sync_queue.put(read);
                                     }
+                                }
+                                else {
+                                    next_chat.has_new = true;
+                                }
+                                ctx.redraw = true;
+                                if (message.from_me == false) {
+                                    _ = try std.process.Child.run(.{ .argv = &.{"mpv", "assets/Blow.aiff", "&"}, .allocator = self.alloc });
                                 }
                             }
                         }
                     },
                     .BulkMessage => |bulk| {
-                        var chat: *internal.Chat = undefined;
-                        for (self.chats.items) |*next_chat| {
+                        var chat: ?*internal.Chat = null;
+                        for (self.chats.items) |next_chat| {
                             if (std.mem.eql(u8, next_chat.guid, bulk.chat_guid)) {
                                 chat = next_chat;
                             }
                         }
-                        for (0..bulk.messages.len) |i| {
-                            const index = bulk.messages.len - i - 1;
-                            try chat.messages.append(try internal.Message.init(self.alloc, bulk.messages[index], self.contacts, &.{}));
-                        }
-                        if (self.active_chat) |active_chat| {
-                            if (std.mem.eql(u8, active_chat.guid, chat.guid)) {
-                                try self.model.mainChatRebuild(self.active_chat.?);
+                        if (chat) |found| {
+                            for (0..bulk.messages.len) |i| {
+                                const index = bulk.messages.len - i - 1;
+                                try found.messages.append(try internal.Message.init(self.alloc, bulk.messages[index], self.contacts, &.{}));
                             }
+                            if (self.active_chat) |active_chat| {
+                                if (std.mem.eql(u8, active_chat.guid, found.guid)) {
+                                    try self.model.mainChatRebuild(self.active_chat.?);
+                                }
+                            }
+                            ctx.redraw = true;
                         }
-                        ctx.redraw = true;
                     },
                     .Quit => {
                         ctx.quit = true;

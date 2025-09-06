@@ -1,4 +1,3 @@
-const Button = @import("button.zig").Button;
 //const Image = @import("image.zig").Image;
 const internal = @import("internal.zig");
 const VirticalView = @import("virtical.zig").VirticalView;
@@ -89,14 +88,14 @@ fn Buffer() MessageType {
 }
 
 alloc:              std.mem.Allocator,
-chats_side_list:    std.ArrayList(vxfw.Text),
+chats_list:         std.ArrayList(vxfw.Text),
+chats_side_view:    vxfw.ListView,
 input:              vxfw.TextField,
 input_window:       vxfw.SplitView,
 messages_list:      std.ArrayList(MessageType),
 messages_view:      vxfw.ListView,
-send:               Button,
+send:               vxfw.Button,
 main_split:         vxfw.SplitView,
-chats_side_view:    vxfw.ListView,
 main_window:        VirticalView,
 ucd:                *vaxis.Unicode,
 
@@ -107,14 +106,14 @@ pub fn init(alloc: std.mem.Allocator) !*Model {
 
     model.* = .{
         .alloc              = alloc,
-        .chats_side_list    = try std.ArrayList(vxfw.Text).initCapacity(alloc, 20),
+        .chats_list         = try std.ArrayList(vxfw.Text).initCapacity(alloc, 50),
+        .chats_side_view    = .{.children = .{.builder = vxfw.ListView.Builder{.userdata = model, .buildFn = Model.chatListBuilder}}},
         .input              = vxfw.TextField.init(alloc, ucd),
         .input_window       = .{.lhs = undefined, .rhs = undefined, .width = 50},
         .messages_list      = try std.ArrayList(MessageType).initCapacity(alloc, 2000),
         .messages_view      = .{.children = .{.builder = .{.userdata = model, .buildFn = Model.messageListBuilder}}},
         .send               = .{.label = "Send", .onClick = undefined, .userdata = undefined, .style = .{.default = .{.bg = BLUE}}},
         .main_split         = .{.lhs = undefined, .rhs = undefined, .width = 30},
-        .chats_side_view    = .{.children = .{.builder = vxfw.ListView.Builder{.userdata = model, .buildFn = Model.chatListBuilder}}},
         .main_window        = .{.lhs = undefined, .rhs = undefined, .height = 50},
         .ucd                = ucd,
     };
@@ -130,24 +129,24 @@ pub fn init(alloc: std.mem.Allocator) !*Model {
 }
 
 pub fn deinit(self: *Model) void {
-    self.chats_side_list.deinit();
+    self.chats_list.deinit();
     self.input.deinit();
     self.messages_list.deinit();
-    self.ucd.deinit();
+    self.ucd.deinit(self.alloc);
     self.alloc.destroy(self.ucd);
     self.alloc.destroy(self);
 }
 
-pub fn chatListAdd(self: *Model, chat: internal.Chat) !void {
+pub fn chatListAdd(self: *Model, chat: *internal.Chat) !void {
     const bg = if (chat.hasUnread() == true) BLUE else BLACK;
-    try self.chats_side_list.append(.{.style = .{.bg = bg, .fg = WHITE}, .text = chat.display_name});
+    try self.chats_list.append(.{.style = .{.bg = bg, .fg = WHITE}, .text = chat.display_name});
 }
 
 fn chatListBuilder(ptr: *const anyopaque, idx: usize, _: usize) ?vxfw.Widget {
     const self: *const Model = @ptrCast(@alignCast(ptr));
-    if (idx >= self.chats_side_list.items.len) return null;
+    if (idx >= self.chats_list.items.len) return null;
 
-    return self.chats_side_list.items[idx].widget();
+    return self.chats_list.items[idx].widget();
 }
 
 pub fn redraw(self: *Model, ctx: vaxis.vxfw.DrawContext) !void {
@@ -181,7 +180,7 @@ pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
     // view cursor handled by message add
 }
 
-pub fn messageAdd(self: *Model, new_message: internal.Message, needs_label: bool, needs_time: bool) !void {
+pub fn messageAdd(self: *Model, new_message: *internal.Message, needs_label: bool, needs_time: bool) !void {
     if (needs_label == true) {
         try self.messages_list.append(Buffer());
         if (needs_time == true) {

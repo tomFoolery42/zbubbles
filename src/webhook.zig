@@ -39,10 +39,12 @@ pub fn init(alloc: std.mem.Allocator, ui_queue: *ui.Queue) !Webhook {
 }
 
 pub fn deinit(self: *Webhook) void {
+    std.debug.print("webhook bailing\n", .{});
     self.impl.log.close();
     self.alloc.destroy(self.impl);
     self.server.stop();
     self.server.deinit();
+    std.debug.print("webhook bailed\n", .{});
 }
 
 pub fn listen(self: *Webhook) !void {

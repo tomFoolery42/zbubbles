@@ -4,10 +4,7 @@ const std = @import("std");
 const zig_time = @import("zig-time");
 
 const Allocator             = std.mem.Allocator;
-pub const AttachmentPool    = std.heap.MemoryPool(Attachment);
-pub const ChatPool          = std.heap.MemoryPool(Chat);
 pub const Contacts          = std.ArrayList(Contact);
-pub const MessagePool       = std.heap.MemoryPool(Message);
 pub const String            = []const u8;
 
 
@@ -82,10 +79,10 @@ pub const Chat = struct {
     display_name:   []const u8,
     guid:           []const u8,
     has_new:        bool,
-    messages:       std.ArrayList(Message),
+    messages:       std.ArrayList(*Message),
     participants:   []Contact,
 
-    pub fn init(alloc: Allocator, chat: schema.Chat, contacts: *Contacts) !Chat {
+    pub fn init(alloc: Allocator, chat: schema.Chat, contacts: *Contacts) !*Chat {
         const participants = try find(alloc, contacts, chat.participants);
         var display_name: String = undefined;
         if (participants.len == 1) {
@@ -96,27 +93,31 @@ pub const Chat = struct {
                 display_name = try alloc.dupe(u8, chat.displayName);
             }
             else {
-                display_name = "unnamed chat";
+                display_name = try alloc.dupe(u8, "unnamed chat");
             }
         }
 
-        return .{
+        const self = try alloc.create(Chat);
+        self.* = .{
             .alloc          = alloc,
-            .display_name   = try alloc.dupe(u8, chat.displayName),
+            .display_name   = display_name,
             .guid           = try alloc.dupe(u8, chat.guid),
             .has_new        = false,
-            .messages       = try std.ArrayList(Message).initCapacity(alloc, 100),
+            .messages       = try std.ArrayList(*Message).initCapacity(alloc, 100),
             .participants   = participants,
         };
+
+        return self;
     }
 
     pub fn deinit(self: *Chat) void {
         self.alloc.free(self.display_name);
         self.alloc.free(self.guid);
-        for (self.messages.items) |*next| {
+        for (self.messages.items) |next| {
             next.deinit();
         }
         self.messages.deinit();
+        self.alloc.destroy(self);
     }
 
     pub fn hasUnread(self: Chat) bool {
@@ -165,7 +166,7 @@ pub const Message = struct {
     read:           bool,
     text:           []const u8,
 
-    pub fn init(alloc: Allocator, message: schema.Message, contacts: *Contacts, attachments: []Attachment) !Message {
+    pub fn init(alloc: Allocator, message: schema.Message, contacts: *Contacts, attachments: []Attachment) !*Message {
         //first item in contacts is always me
         var contact = &contacts.items[0];
         if (message.handle) |handle| {
@@ -174,7 +175,8 @@ pub const Message = struct {
             }
         }
 
-        return .{
+        const self = try alloc.create(Message);
+        self.* = .{
             .alloc = alloc,
             .date_time = zig_time.Time.fromMilliTimestamp(@intCast(message.dateCreated)).setLoc(zig_time.Location.create(-(5 * 60), "CDT")),
             .attachments = try alloc.dupe(Attachment, attachments),
@@ -185,12 +187,15 @@ pub const Message = struct {
             .read = true,
             .text = try alloc.dupe(u8, message.text),
         };
+
+        return self;
     }
 
     pub fn deinit(self: *Message) void {
         self.alloc.free(self.attachments);
         self.alloc.free(self.guid);
         self.alloc.free(self.text);
+        self.alloc.destroy(self);
     }
 
     pub fn jsonStringify(self: *Message, jws: anytype) !void {
