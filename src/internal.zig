@@ -3,14 +3,15 @@ const schema = @import("schema.zig");
 const std = @import("std");
 const zig_time = @import("zig-time");
 
+const Allocator             = std.mem.Allocator;
+pub const AttachmentPool    = std.heap.MemoryPool(Attachment);
+pub const ChatPool          = std.heap.MemoryPool(Chat);
+pub const Contacts          = std.ArrayList(Contact);
+pub const MessagePool       = std.heap.MemoryPool(Message);
+pub const String            = []const u8;
 
-pub const Allocator = struct {
-    chat_pool:      std.heap.MemoryPool(Chat),
-    message_pool:   std.heap.MemoryPool(Message),
-};
-pub const Contacts = std.ArrayList(Contact);
 
-fn contactFind(alloc: std.mem.Allocator, contacts: *Contacts, participant: schema.Handle) !*Contact {
+fn contactFind(alloc: Allocator, contacts: *Contacts, participant: schema.Handle) !*Contact {
     for (contacts.items) |*next| {
         if (std.mem.eql(u8, next.number, participant.address) == true) {
             return next;
@@ -19,11 +20,11 @@ fn contactFind(alloc: std.mem.Allocator, contacts: *Contacts, participant: schem
 
     const display_name = if (participant.address.len > 0) participant.address else "invalid display name";
 
-    try contacts.append(.{.display_name = try alloc.dupe(u8, display_name), .number = try alloc.dupe(u8, participant.address)});
+    try contacts.append(try Contact.init(alloc, display_name, participant.address));
     return &contacts.items[contacts.items.len - 1];
 }
 
-fn find(alloc: std.mem.Allocator, contacts: *Contacts, participants: []schema.Handle) ![]Contact {
+fn find(alloc: Allocator, contacts: *Contacts, participants: []schema.Handle) ![]Contact {
     var found_contacts = try alloc.alloc(Contact, participants.len);
     for (participants, 0..) |participant, i| {
         found_contacts[i] = (try contactFind(alloc, contacts, participant)).*;
@@ -33,11 +34,26 @@ fn find(alloc: std.mem.Allocator, contacts: *Contacts, participants: []schema.Ha
 }
 
 pub const Attachment = struct {
-    alloc:      std.mem.Allocator,
+    alloc:      Allocator,
     data:       []const u8,
     guid:       []const u8,
     is_sticker: bool,
     mime_type:  []const u8,
+
+    pub fn init(alloc: Allocator, attachments: []schema.Attachment) ![]Attachment {
+        const self = try alloc.alloc(attachments.len);
+        for (attachments, 0..attachments.len) |attachment, i| {
+            self[i] = .{
+                .alloc = alloc,
+                .data = attachment.data,
+                .guid = attachment.guid,
+                .is_sticker = attachment.isSticker,
+                .mime_type = if (attachment.mimeType) |mimeType| mimeType else "",
+            };
+        }
+
+        return self;
+    }
 
     pub fn from(alloc: std.mem.Allocator, attachments: []schema.Attachment) ![]Attachment {
         var created: []Attachment = try alloc.alloc(Attachment, attachments.len);
@@ -62,16 +78,16 @@ pub const Attachment = struct {
 };
 
 pub const Chat = struct {
+    alloc:          Allocator,
     display_name:   []const u8,
     guid:           []const u8,
     has_new:        bool,
     messages:       std.ArrayList(Message),
     participants:   []Contact,
 
-    pub fn from(alloc: std.mem.Allocator, chat: schema.Chat, contacts: *Contacts) !Chat {
+    pub fn init(alloc: Allocator, chat: schema.Chat, contacts: *Contacts) !Chat {
         const participants = try find(alloc, contacts, chat.participants);
-        var display_name: []const u8 = undefined;
-//        const display_name = if (participants.len == 1) try alloc.dupe(u8, participants[0].display_name) else try alloc.dupe(u8, chat.displayName);
+        var display_name: String = undefined;
         if (participants.len == 1) {
             display_name = try alloc.dupe(u8, participants[0].display_name);
         }
@@ -85,18 +101,22 @@ pub const Chat = struct {
         }
 
         return .{
-            .display_name   = display_name,
+            .alloc          = alloc,
+            .display_name   = try alloc.dupe(u8, chat.displayName),
             .guid           = try alloc.dupe(u8, chat.guid),
             .has_new        = false,
             .messages       = try std.ArrayList(Message).initCapacity(alloc, 100),
-            .participants   = try find(alloc, contacts, chat.participants),
+            .participants   = participants,
         };
     }
 
     pub fn deinit(self: *Chat) void {
+        self.alloc.free(self.display_name);
+        self.alloc.free(self.guid);
         for (self.messages.items) |*next| {
             next.deinit();
         }
+        self.messages.deinit();
     }
 
     pub fn hasUnread(self: Chat) bool {
@@ -114,6 +134,13 @@ pub const Contact = struct {
     display_name:   []const u8,
     number:         []const u8,
 
+    pub fn init(alloc: Allocator, name: String, number: String) !Contact {
+        return .{
+            .display_name = try alloc.dupe(u8, name),
+            .number = try alloc.dupe(u8, number),
+        };
+    }
+
     pub fn jsonStringify(self: *const Contact, jws: anytype) !void {
         try jws.beginObject();
 
@@ -128,7 +155,7 @@ pub const Contact = struct {
 };
 
 pub const Message = struct {
-    alloc:          std.mem.Allocator,
+    alloc:          Allocator,
     date_time:      zig_time.Time,
     attachments:    []Attachment,
     contact:        *Contact,
@@ -138,8 +165,8 @@ pub const Message = struct {
     read:           bool,
     text:           []const u8,
 
-    pub fn from(alloc: std.mem.Allocator, message: schema.Message, contacts: *Contacts) !Message {
-        // first item in contacts is always me
+    pub fn init(alloc: Allocator, message: schema.Message, contacts: *Contacts, attachments: []Attachment) !Message {
+        //first item in contacts is always me
         var contact = &contacts.items[0];
         if (message.handle) |handle| {
             if (message.isFromMe == false) {
@@ -148,24 +175,25 @@ pub const Message = struct {
         }
 
         return .{
-            .alloc          = alloc,
-            .date_time      = zig_time.Time.fromMilliTimestamp(@intCast(message.dateCreated)).setLoc(zig_time.Location.create(-(5 * 60), "CDT")),
-            .attachments    = try Attachment.from(alloc, message.attachments),
-            .contact        = contact,
-            .date_created   = message.dateCreated,
-            .from_me        = message.isFromMe,
-            .guid           = try alloc.dupe(u8, message.guid),
-            .read           = true,
-            .text           = try alloc.dupe(u8, message.text),
+            .alloc = alloc,
+            .date_time = zig_time.Time.fromMilliTimestamp(@intCast(message.dateCreated)).setLoc(zig_time.Location.create(-(5 * 60), "CDT")),
+            .attachments = try alloc.dupe(Attachment, attachments),
+            .contact = contact,
+            .date_created = message.dateCreated,
+            .from_me = message.isFromMe,
+            .guid = try alloc.dupe(u8, message.guid),
+            .read = true,
+            .text = try alloc.dupe(u8, message.text),
         };
     }
 
     pub fn deinit(self: *Message) void {
+        self.alloc.free(self.attachments);
         self.alloc.free(self.guid);
         self.alloc.free(self.text);
     }
 
-    pub fn jsonStringify(self: *Contact, jws: anytype) !void {
+    pub fn jsonStringify(self: *Message, jws: anytype) !void {
         try jws.beginObject();
 
         try jws.objectField("contact");

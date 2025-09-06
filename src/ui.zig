@@ -212,7 +212,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                 defer self.alloc.destroy(queue_event);
                 switch (queue_event.*) {
                     .Chat => |new_chat| {
-                        try self.chats.append(try internal.Chat.from(self.alloc, new_chat, self.contacts));
+                        try self.chats.append(try internal.Chat.init(self.alloc, new_chat, self.contacts));
                         try self.model.chatListAdd(self.chats.items[self.chats.items.len - 1]);
                         if (self.active_chat == null) {
                             self.active_chat = &self.chats.items[self.chats.items.len - 1];
@@ -225,7 +225,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                         for (self.chats.items) |*next_chat| {
                             if (new_message.chats.len > 0 and std.mem.eql(u8, next_chat.guid, new_message.chats[0].guid) and containsMessage(next_chat, new_message.guid) == false) {
                                 if (containsMessage(next_chat, new_message.guid) == false) {
-                                    const message = try internal.Message.from(self.alloc, new_message, self.contacts);
+                                    const message = try internal.Message.init(self.alloc, new_message, self.contacts, &.{});
                                     try next_chat.messages.append(message);
                                     if (next_chat == self.active_chat) {
                                         const last_sender = if (next_chat.messages.items.len > 1) next_chat.messages.items[next_chat.messages.items.len - 2].contact.display_name else "";
@@ -258,7 +258,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                         }
                         for (0..bulk.messages.len) |i| {
                             const index = bulk.messages.len - i - 1;
-                            try chat.messages.append(try internal.Message.from(self.alloc, bulk.messages[index], self.contacts));
+                            try chat.messages.append(try internal.Message.init(self.alloc, bulk.messages[index], self.contacts, &.{}));
                         }
                         if (self.active_chat) |active_chat| {
                             if (std.mem.eql(u8, active_chat.guid, chat.guid)) {

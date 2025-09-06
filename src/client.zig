@@ -6,32 +6,32 @@ const schema = @import("schema.zig");
 const std = @import("std");
 
 
-const SERVER_BUFFER_SIZE: u16   = std.math.maxInt(u16);
 const CHAT_REQUEST              = "chat/query";
 const PING                      = "ping";
 const TEXT_REQUEST              = "message/text";
 
+const Allocator = std.mem.Allocator;
 pub const Event = union(enum) {
     Bail,
     Message:        schema.TextRequest,
-    Read:           []const u8,
-    TypingStart:    []const u8,
-    TypingStop:     []const u8,
+    Read:           String,
+    TypingStart:    String,
+    TypingStop:     String,
 };
 pub const Queue = MessageQueue(*Event, 100);
-
+const String = []const u8;
 pub const Sync = @This();
 
-alloc:      std.mem.Allocator,
+alloc:      Allocator,
 contacts:   *internal.Contacts,
-host:       []const u8,
+host:       String,
 client:     std.http.Client,
 log:        std.fs.File,
-password:   []const u8,
+password:   String,
 ui_queue:   *ui.Queue,
 sync_queue: *Queue,
 
-pub fn init(base: std.mem.Allocator, host: []const u8, password: []const u8, contacts: *internal.Contacts, ui_queue: *ui.Queue, sync_queue: *Queue) !Sync {
+pub fn init(base: Allocator, host: String, password: String, contacts: *internal.Contacts, ui_queue: *ui.Queue, sync_queue: *Queue) !Sync {
     return .{
         .alloc      = base,
         .contacts   = contacts,
@@ -46,13 +46,11 @@ pub fn init(base: std.mem.Allocator, host: []const u8, password: []const u8, con
 
 pub fn deinit(self: *Sync) void {
     _ = self;
-//    self.arena.deinit();
 }
 
 fn chatsGet(self: *Sync) ![]schema.Chat {
-    const alloc = self.alloc;
-    const chat_url = try std.fmt.allocPrint(alloc, "{s}/{s}?password={s}", .{self.host, CHAT_REQUEST, self.password});
-    defer alloc.free(chat_url);
+    const chat_url = try std.fmt.allocPrint(self.alloc, "{s}/{s}?password={s}", .{self.host, CHAT_REQUEST, self.password});
+    defer self.alloc.free(chat_url);
     const url = try std.Uri.parse(chat_url);
     var server_buffer: [1024]u8 = undefined;
     var request = try self.client.open(
@@ -69,40 +67,42 @@ fn chatsGet(self: *Sync) ![]schema.Chat {
     try std.json.stringify(chat_request, .{}, request.writer());
     try request.finish();
     try request.wait();
-    const json = try request.reader().readAllAlloc(alloc, std.math.maxInt(usize));
-    defer alloc.free(json);
-    const chats = try std.json.parseFromSliceLeaky(schema.Response([]schema.Chat), alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
+    const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
+    defer self.alloc.free(json);
+    const chats = try std.json.parseFromSliceLeaky(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
 
     return chats.data;
 }
 
 pub fn initialSync(self: *Sync) !void {
-    const alloc = self.alloc;
     for (try self.chatsGet()) |*chat| {
-        const new_event = try alloc.create(ui.Event);
+        const new_event = try self.alloc.create(ui.Event);
         new_event.* = .{.Chat = chat.*};
         try self.ui_queue.put(new_event);
 
-        const bulk_ptr = try alloc.create(ui.Event);
-        bulk_ptr.* = .{.BulkMessage = .{.chat_guid = chat.guid, .messages = try self.messagesGet(alloc, chat.guid, null)}};
-        try self.ui_queue.put(bulk_ptr);
+        if (self.messagesGet(chat.guid, null)) |messages| {
+            const bulk_ptr = try self.alloc.create(ui.Event);
+            bulk_ptr.* = .{.BulkMessage = .{.chat_guid = chat.guid, .messages = messages}};
+            try self.ui_queue.put(bulk_ptr);
+        }
+        else |err| {try self.log.writer().print("failed to parse for {s}. Error: {s}\n", .{chat.guid, std.json.fmt(err, .{})});}
     }
 }
 
-pub fn messagesGet(self: *Sync, alloc: std.mem.Allocator, guid: []const u8, after_date: ?u64) ![]schema.Message {
-    const chat_request = if (after_date) |after| try std.fmt.allocPrint(alloc, "{s}/chat/{s}/message?password={s}&limit={d}&after={d}&with=attachment", .{
+pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) ![]schema.Message {
+    const chat_request = if (after_date) |after| try std.fmt.allocPrint(self.alloc, "{s}/chat/{s}/message?password={s}&limit={d}&after={d}", .{ //&with=attachment", .{
         self.host,
         guid,
         self.password,
-        1000,
+        10,
         after+1,
-    }) else try std.fmt.allocPrint(alloc, "{s}/chat/{s}/message?password={s}&limit={d}&with=attachment", .{
+    }) else try std.fmt.allocPrint(self.alloc, "{s}/chat/{s}/message?password={s}&limit={d}", .{ //&with=attachment", .{
         self.host,
         guid,
         self.password,
-        1000,
+        10,
     });
-    defer alloc.free(chat_request);
+    defer self.alloc.free(chat_request);
     const url = try std.Uri.parse(chat_request);
     var server_buffer: [1024]u8 = undefined;
     var request = try self.client.open(.GET, url, .{.keep_alive = false, .server_header_buffer = &server_buffer});
@@ -110,15 +110,17 @@ pub fn messagesGet(self: *Sync, alloc: std.mem.Allocator, guid: []const u8, afte
 
     try request.send();
     try request.wait();
-    const json = try request.reader().readAllAlloc(alloc, std.math.maxInt(usize));
-    defer alloc.free(json);
-    try self.log.writer().print("new message: {s}\n", .{json});
-    const list = try std.json.parseFromSliceLeaky(schema.Response([]schema.Message), alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
+    const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
+    defer self.alloc.free(json);
+    const list = std.json.parseFromSliceLeaky(schema.Response([]schema.Message), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true}) catch |err| {
+        try self.log.writer().print("new message: {s}\n", .{json});
+        return err;
+    };
 
     return list.data;
 }
 
-pub fn readMark(self: *Sync, chat_guid: []const u8) !void {
+pub fn readMark(self: *Sync, chat_guid: String) !void {
     const alloc = self.alloc;
     const read_url = try std.fmt.allocPrint(alloc, "{s}/chat/{s}/read?password={s}", .{self.host, chat_guid, self.password});
     defer alloc.free(read_url);
@@ -174,7 +176,7 @@ pub fn send(self: *Sync, text_request: schema.TextRequest) !bool {
     return true;
 }
 
-pub fn typingIndicate(self: *Sync, chat_guid: []const u8, typing: bool) !void {
+pub fn typingIndicate(self: *Sync, chat_guid: String, typing: bool) !void {
     const alloc = self.alloc;
     const request_type: std.http.Method = if (typing) .POST else .DELETE;
     const typing_request = try std.fmt.allocPrint(alloc, "{s}/chat/{s}/typing?password={s}", .{self.host, chat_guid, self.password});
@@ -213,6 +215,6 @@ pub fn verify(self: *Sync) !void {
     const json = try request.reader().readAllAlloc(alloc, std.math.maxInt(usize));
     defer alloc.free(json);
     // should make it so if it fails (such as cant log in) then the function will fail and quit
-    const parsed = try std.json.parseFromSlice(schema.Response([]const u8), alloc, json, .{.ignore_unknown_fields = true});
+    const parsed = try std.json.parseFromSlice(schema.Response(String), alloc, json, .{.ignore_unknown_fields = true});
     defer parsed.deinit();
 }

@@ -7,6 +7,7 @@ const Webhook = @import("webhook.zig").Webhook;
 const std = @import("std");
 
 
+const Allocator = std.mem.Allocator;
 const Config = struct {
     asset_path:     []const u8,
     host:           []const u8,
@@ -48,10 +49,11 @@ fn webhook_listen(webhook: *Webhook) void {
     webhook.listen() catch {};
 }
 
-fn data_sync(alloc: std.mem.Allocator, sync: *client.Sync, ui_queue: *ui.Queue, sync_queue: *client.Queue) !void {
+fn data_sync(alloc: Allocator, sync: *client.Sync, ui_queue: *ui.Queue, sync_queue: *client.Queue) !void {
     var running = true;
-    try sync.initialSync(); // catch |err| {std.debug.print("initial sync failed? {any}\n", .{err});};
+    try sync.initialSync();
     var webhook = try Webhook.init(alloc, ui_queue);
+    defer webhook.deinit();
 
     var webhook_handle = try std.Thread.spawn(.{}, webhook_listen, .{&webhook});
     defer webhook_handle.join();
@@ -88,24 +90,23 @@ fn data_sync(alloc: std.mem.Allocator, sync: *client.Sync, ui_queue: *ui.Queue, 
             }
         }
     }
-    webhook.deinit();
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{.thread_safe = true}){};
     defer std.debug.assert(gpa.deinit() == .ok);
-    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
-        .child_allocator = gpa.allocator(),
-    };
-    const alloc = thread_safe_arena.allocator();
+//    var thread_safe_arena: std.heap.ThreadSafeAllocator = .{
+//        .child_allocator = gpa.allocator(),
+//    };
+//    var alloc = thread_safe_arena.allocator();
+    var alloc = gpa.allocator();
 
     var ui_queue = ui.Queue.init();
     defer ui_queue.deinit();
     var sync_queue = client.Queue.init();
     defer sync_queue.deinit();
-    errdefer sync_queue.deinit();
 
-    const config = try config_load(alloc); //, "~/.config/zbubbles/config.json") catch try config_load(alloc, "./config.json");
+    const config = try config_load(alloc);
     defer config.deinit();
     var contacts = try contacts_load(alloc, config.value.contacts_file);
     defer contacts.deinit();
