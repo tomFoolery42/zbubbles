@@ -48,7 +48,7 @@ pub fn deinit(self: *Sync) void {
     self.log.close();
 }
 
-fn chatsGet(self: *Sync) !schema.Response([]schema.Chat) {
+fn chatsGet(self: *Sync) ![]schema.Chat {
     const chat_url = try std.fmt.allocPrint(self.alloc, "{s}/{s}?password={s}", .{self.host, CHAT_REQUEST, self.password});
     defer self.alloc.free(chat_url);
     const url = try std.Uri.parse(chat_url);
@@ -70,25 +70,33 @@ fn chatsGet(self: *Sync) !schema.Response([]schema.Chat) {
     const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
     defer self.alloc.free(json);
     try self.log.writer().print("chats: {s}\n", .{json});
-    const chats = try std.json.parseFromSliceLeaky(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
+    const chats = try std.json.parseFromSlice(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_if_needed, .ignore_unknown_fields = true});
+    defer chats.deinit();
 
-    return chats;
+    return self.alloc.dupe(schema.Chat, chats.value.data);
 }
 
 pub fn initialSync(self: *Sync) !void {
-    const response = try self.chatsGet();
-    defer self.alloc.destroy(&response);
-    for (response.data) |chat| {
-        const new_event = try self.alloc.create(ui.Event);
-        new_event.* = .{.Chat = chat};
-        try self.ui_queue.put(new_event);
+    const chats = try self.chatsGet();
+    defer self.alloc.free(chats);
 
-        if (self.messagesGet(chat.guid, null)) |messages| {
+    for (chats) |new_chat| {
+        const chat = try internal.Chat.init(self.alloc, new_chat, self.contacts);
+        const chat_event = try self.alloc.create(ui.Event);
+        chat_event.* = .{.Chat = chat};
+        try self.ui_queue.put(chat_event);
+
+        if (self.messagesGet(new_chat.guid, null)) |schema_messages| {
+            defer self.alloc.free(schema_messages);
+            const messages = try self.alloc.alloc(*internal.Message, schema_messages.len);
+            for (schema_messages, 0..schema_messages.len) |next, i| {
+                messages[i] = try internal.Message.init(self.alloc, next, new_chat.guid, self.contacts, &.{});
+            }
             const bulk_ptr = try self.alloc.create(ui.Event);
-            bulk_ptr.* = .{.BulkMessage = .{.chat_guid = chat.guid, .messages = messages}};
+            bulk_ptr.* = .{.BulkMessage = .{.chat_guid = new_chat.guid, .messages = messages}};
             try self.ui_queue.put(bulk_ptr);
         }
-        else |err| {try self.log.writer().print("failed to parse for {s}. Error: {s}\n", .{chat.guid, std.json.fmt(err, .{})});}
+        else |err| {try self.log.writer().print("failed to parse for {s}. Error: {s}\n", .{new_chat.guid, std.json.fmt(err, .{})});}
     }
 }
 

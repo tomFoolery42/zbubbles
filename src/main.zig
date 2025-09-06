@@ -49,10 +49,10 @@ fn webhook_listen(webhook: *Webhook) void {
     webhook.listen() catch {};
 }
 
-fn data_sync(alloc: Allocator, sync: *client.Sync, ui_queue: *ui.Queue, sync_queue: *client.Queue) !void {
+fn data_sync(alloc: Allocator, sync: *client.Sync, ui_queue: *ui.Queue, sync_queue: *client.Queue, contacts: *internal.Contacts) !void {
     var running = true;
     try sync.initialSync();
-    var webhook = try Webhook.init(alloc, ui_queue);
+    var webhook = try Webhook.init(alloc, ui_queue, contacts);
     var webhook_handle = try std.Thread.spawn(.{}, webhook_listen, .{&webhook});
     defer {
         webhook.deinit();
@@ -119,7 +119,7 @@ pub fn main() !void {
     try sync.verify();
 
 
-    var sync_handle = try std.Thread.spawn(.{}, data_sync, .{alloc, &sync, &ui_queue, &sync_queue});
+    var sync_handle = try std.Thread.spawn(.{}, data_sync, .{alloc, &sync, &ui_queue, &sync_queue, &contacts});
     defer sync_handle.join();
 
     try interface.run(.{.framerate = 60});

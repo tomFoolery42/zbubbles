@@ -1,3 +1,4 @@
+const internal = @import("internal.zig");
 const ui = @import("ui.zig");
 const schema = @import("schema.zig");
 
@@ -12,6 +13,7 @@ const Notification = struct {
 };
 const Impl = struct {
     alloc:      std.mem.Allocator,
+    contacts:   *internal.Contacts,
     log:        std.fs.File,
     ui_queue:   *ui.Queue,
 };
@@ -22,10 +24,11 @@ ui_queue:   *ui.Queue,
 server:     httpz.Server(*Impl),
 
 // https://github.com/karlseguin/http.zig
-pub fn init(alloc: std.mem.Allocator, ui_queue: *ui.Queue) !Webhook {
+pub fn init(alloc: std.mem.Allocator, ui_queue: *ui.Queue, contacts: *internal.Contacts) !Webhook {
     const impl = try alloc.create(Impl);
     impl.* = .{
         .alloc = alloc,
+        .contacts = contacts,
         .log = try std.fs.cwd().createFile("webhook.log", .{}),
         .ui_queue = ui_queue
     };
@@ -72,13 +75,18 @@ fn notificationHandle(self: *Impl, req: *httpz.Request, _: *httpz.Response) !voi
                 
             }
             else if (std.mem.eql(u8, notification_type, "new-message")) { // or std.mem.eql(u8, notification_type, "updated-message")) {
+                const tmp = try std.json.parseFromValue(schema.Message, self.alloc, data, .{.ignore_unknown_fields = true});
+                defer tmp.deinit();
+                const chat_guid = tmp.value.chats[0].guid;
                 const message_ptr = try self.alloc.create(ui.Event);
-                message_ptr.* = .{.Message = try std.json.parseFromValueLeaky(schema.Message, self.alloc, data, .{.ignore_unknown_fields = true})};
+                message_ptr.* = .{.Message = try internal.Message.init(self.alloc, tmp.value, chat_guid, self.contacts, &.{})};
                 try self.ui_queue.put(message_ptr);
             }
             else if (std.mem.eql(u8, notification_type, "new-chat")) {
+                const tmp = try std.json.parseFromValue(schema.Chat, self.alloc, data, .{.ignore_unknown_fields = true});
+                defer tmp.deinit();
                 const chat_ptr = try self.alloc.create(ui.Event);
-                chat_ptr.* = .{.Chat = try std.json.parseFromValueLeaky(schema.Chat, self.alloc, data, .{.ignore_unknown_fields = true})};
+                chat_ptr.* = .{.Chat = try internal.Chat.init(self.alloc, tmp.value, self.contacts)};
                 try self.ui_queue.put(chat_ptr);
             }
             else {

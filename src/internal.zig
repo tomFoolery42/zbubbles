@@ -32,10 +32,10 @@ fn find(alloc: Allocator, contacts: *Contacts, participants: []schema.Handle) ![
 
 pub const Attachment = struct {
     alloc:      Allocator,
-    data:       []const u8,
-    guid:       []const u8,
+    data:       String,
+    guid:       String,
     is_sticker: bool,
-    mime_type:  []const u8,
+    mime_type:  String,
 
     pub fn init(alloc: Allocator, attachments: []schema.Attachment) ![]Attachment {
         const self = try alloc.alloc(attachments.len);
@@ -76,8 +76,8 @@ pub const Attachment = struct {
 
 pub const Chat = struct {
     alloc:          Allocator,
-    display_name:   []const u8,
-    guid:           []const u8,
+    display_name:   String,
+    guid:           String,
     has_new:        bool,
     messages:       std.ArrayList(*Message),
     participants:   []Contact,
@@ -132,8 +132,8 @@ pub const Chat = struct {
 };
 
 pub const Contact = struct {
-    display_name:   []const u8,
-    number:         []const u8,
+    display_name:   String,
+    number:         String,
 
     pub fn init(alloc: Allocator, name: String, number: String) !Contact {
         return .{
@@ -159,14 +159,15 @@ pub const Message = struct {
     alloc:          Allocator,
     date_time:      zig_time.Time,
     attachments:    []Attachment,
+    chat_guid:      String,
     contact:        *Contact,
     date_created:   u64,
     from_me:        bool,
-    guid:           []const u8,
+    guid:           String,
     read:           bool,
-    text:           []const u8,
+    text:           String,
 
-    pub fn init(alloc: Allocator, message: schema.Message, contacts: *Contacts, attachments: []Attachment) !*Message {
+    pub fn init(alloc: Allocator, message: schema.Message, chat_guid: String, contacts: *Contacts, attachments: []Attachment) !*Message {
         //first item in contacts is always me
         var contact = &contacts.items[0];
         if (message.handle) |handle| {
@@ -180,6 +181,7 @@ pub const Message = struct {
             .alloc = alloc,
             .date_time = zig_time.Time.fromMilliTimestamp(@intCast(message.dateCreated)).setLoc(zig_time.Location.create(-(5 * 60), "CDT")),
             .attachments = try alloc.dupe(Attachment, attachments),
+            .chat_guid = try alloc.dupe(u8, chat_guid),
             .contact = contact,
             .date_created = message.dateCreated,
             .from_me = message.isFromMe,
@@ -193,6 +195,7 @@ pub const Message = struct {
 
     pub fn deinit(self: *Message) void {
         self.alloc.free(self.attachments);
+        self.alloc.free(self.chat_guid);
         self.alloc.free(self.guid);
         self.alloc.free(self.text);
         self.alloc.destroy(self);

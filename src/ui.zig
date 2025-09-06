@@ -11,9 +11,9 @@ const vxfw = vaxis.vxfw;
 
 
 pub const Event = union(enum) {
-    BulkMessage:    struct {chat_guid: []const u8, messages: []const schema.Message},
-    Chat:           schema.Chat,
-    Message:        schema.Message,
+    BulkMessage:    struct {chat_guid: []const u8, messages: []const *internal.Message},
+    Chat:           *internal.Chat,
+    Message:        *internal.Message,
     Quit,
 };
 const TypingNotice = struct {
@@ -213,9 +213,8 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
             const queue_event: *Event = @constCast(@ptrCast(@alignCast(user_event.data)));
                 defer self.alloc.destroy(queue_event);
                 switch (queue_event.*) {
-                    .Chat => |new_chat| {
-                        try self.log.writer().print("got new chat: {s}\n", .{new_chat.displayName});
-                        const chat = try internal.Chat.init(self.alloc, new_chat, self.contacts);
+                    .Chat => |chat| {
+                        try self.log.writer().print("got new chat: {s}\n", .{chat.display_name});
                         try self.chats.append(chat);
                         try self.model.chatListAdd(chat);
                         if (self.active_chat == null) {
@@ -223,16 +222,13 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                             try ctx.setTitle(chat.display_name);
                         }
                         ctx.redraw = true;
-
                     },
-                    .Message => |new_message| {
+                    .Message => |message| {
                         for (self.chats.items) |next_chat| {
                             if (
-                                new_message.chats.len > 0 and 
-                                std.mem.eql(u8, next_chat.guid, new_message.chats[0].guid) and
-                                containsMessage(next_chat, new_message.guid) == false)
+                                std.mem.eql(u8, next_chat.guid, message.chat_guid) and
+                                containsMessage(next_chat, message.guid) == false)
                             {
-                                const message = try internal.Message.init(self.alloc, new_message, self.contacts, &.{});
                                 try next_chat.messages.append(message);
                                 if (next_chat == self.active_chat) {
                                     const last_sender =
@@ -265,10 +261,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                             }
                         }
                         if (chat) |found| {
-                            for (0..bulk.messages.len) |i| {
-                                const index = bulk.messages.len - i - 1;
-                                try found.messages.append(try internal.Message.init(self.alloc, bulk.messages[index], self.contacts, &.{}));
-                            }
+                            try found.messages.appendSlice(bulk.messages);
                             if (self.active_chat) |active_chat| {
                                 if (std.mem.eql(u8, active_chat.guid, found.guid)) {
                                     try self.model.mainChatRebuild(self.active_chat.?);
@@ -277,9 +270,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                             ctx.redraw = true;
                         }
                     },
-                    .Quit => {
-                        ctx.quit = true;
-                    },
+                    .Quit => ctx.quit = true,
                 }
             ctx.consumeEvent();
         },
