@@ -48,7 +48,7 @@ pub fn deinit(self: *Sync) void {
     self.log.close();
 }
 
-fn chatsGet(self: *Sync) ![]schema.Chat {
+fn chatsGet(self: *Sync) !std.json.Parsed(schema.Response([]schema.Chat)) {
     const chat_url = try std.fmt.allocPrint(self.alloc, "{s}/{s}?password={s}", .{self.host, CHAT_REQUEST, self.password});
     defer self.alloc.free(chat_url);
     const url = try std.Uri.parse(chat_url);
@@ -59,7 +59,6 @@ fn chatsGet(self: *Sync) ![]schema.Chat {
         .{.keep_alive = false, .server_header_buffer = &server_buffer, .headers = .{.content_type = .{.override = "application/json"}}}
     );
     defer request.deinit();
-    errdefer request.deinit();
     request.transfer_encoding = .chunked;
 
     const chat_request = schema.ChatRequest{.limit = 1000, .offset = 0, .with = .{}, .sort = "lastmessage"};
@@ -70,37 +69,33 @@ fn chatsGet(self: *Sync) ![]schema.Chat {
     const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
     defer self.alloc.free(json);
     try self.log.writer().print("chats: {s}\n", .{json});
-    const chats = try std.json.parseFromSlice(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_if_needed, .ignore_unknown_fields = true});
-    defer chats.deinit();
-
-    return self.alloc.dupe(schema.Chat, chats.value.data);
+    return try std.json.parseFromSlice(schema.Response([]schema.Chat), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
 }
 
 pub fn initialSync(self: *Sync) !void {
     const chats = try self.chatsGet();
-    defer self.alloc.free(chats);
+    defer chats.deinit();
 
-    for (chats) |new_chat| {
+    for (chats.value.data) |new_chat| {
         const chat = try internal.Chat.init(self.alloc, new_chat, self.contacts);
         const chat_event = try self.alloc.create(ui.Event);
         chat_event.* = .{.Chat = chat};
         try self.ui_queue.put(chat_event);
 
         if (self.messagesGet(new_chat.guid, null)) |schema_messages| {
-            defer self.alloc.free(schema_messages);
-            const messages = try self.alloc.alloc(*internal.Message, schema_messages.len);
-            for (schema_messages, 0..schema_messages.len) |next, i| {
+            defer schema_messages.deinit();
+            const messages = try self.alloc.alloc(*internal.Message, schema_messages.value.data.len);
+            for (schema_messages.value.data, 0..schema_messages.value.data.len) |next, i| {
                 messages[i] = try internal.Message.init(self.alloc, next, new_chat.guid, self.contacts, &.{});
             }
             const bulk_ptr = try self.alloc.create(ui.Event);
-            bulk_ptr.* = .{.BulkMessage = .{.chat_guid = new_chat.guid, .messages = messages}};
+            bulk_ptr.* = .{.BulkMessage = .{.chat_guid = chat.guid, .messages = messages}};
             try self.ui_queue.put(bulk_ptr);
-        }
-        else |err| {try self.log.writer().print("failed to parse for {s}. Error: {s}\n", .{new_chat.guid, std.json.fmt(err, .{})});}
+        } else |err| {try self.log.writer().print("error getting messages: {s}\n", .{std.json.fmt(err, .{})});}
     }
 }
 
-pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) ![]schema.Message {
+pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) !std.json.Parsed(schema.Response([]schema.Message)) {
     const chat_request = if (after_date) |after| try std.fmt.allocPrint(self.alloc, "{s}/chat/{s}/message?password={s}&limit={d}&after={d}", .{ //&with=attachment", .{
         self.host,
         guid,
@@ -123,12 +118,12 @@ pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) ![]schema.Messag
     try request.wait();
     const json = try request.reader().readAllAlloc(self.alloc, std.math.maxInt(usize));
     defer self.alloc.free(json);
-    const list = std.json.parseFromSliceLeaky(schema.Response([]schema.Message), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true}) catch |err| {
+    const list = std.json.parseFromSlice(schema.Response([]schema.Message), self.alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true}) catch |err| {
         try self.log.writer().print("new message: {s}\n", .{json});
         return err;
     };
 
-    return list.data;
+    return list;
 }
 
 pub fn readMark(self: *Sync, chat_guid: String) !void {

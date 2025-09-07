@@ -254,6 +254,7 @@ fn eventHandle(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anye
                         }
                     },
                     .BulkMessage => |bulk| {
+                        defer self.alloc.free(bulk.messages);
                         var chat: ?*internal.Chat = null;
                         for (self.chats.items) |next_chat| {
                             if (std.mem.eql(u8, next_chat.guid, bulk.chat_guid)) {

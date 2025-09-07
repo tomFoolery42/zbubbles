@@ -170,9 +170,10 @@ pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
         var needs_label = true;
         var needs_time = true;
         if (index > 0) {
-            last_message_sender = chat.messages.items[index-1].contact.display_name;
+            const last_message = chat.messages.items[index-1];
+            last_message_sender = last_message.contact.display_name;
             needs_label = std.mem.eql(u8, last_message_sender, message.contact.display_name) == false;
-            needs_time = message.date_created - chat.messages.items[index-1].date_created > MINUTES_5;
+            needs_time = @abs(message.date_created - last_message.date_created) > MINUTES_5;
         }
         try self.messageAdd(message, needs_label, needs_time);
     }
