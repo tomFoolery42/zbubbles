@@ -85,6 +85,7 @@ pub fn initialSync(self: *Sync) !void {
         if (self.messagesGet(new_chat.guid, null)) |schema_messages| {
             defer schema_messages.deinit();
             const messages = try self.alloc.alloc(*internal.Message, schema_messages.value.data.len);
+            std.mem.reverse(schema.Message, schema_messages.value.data);
             for (schema_messages.value.data, 0..schema_messages.value.data.len) |next, i| {
                 messages[i] = try internal.Message.init(self.alloc, next, new_chat.guid, self.contacts, &.{});
             }
@@ -100,13 +101,13 @@ pub fn messagesGet(self: *Sync, guid: String, after_date: ?u64) !std.json.Parsed
         self.host,
         guid,
         self.password,
-        1000,
+        500,
         after+1,
     }) else try std.fmt.allocPrint(self.alloc, "{s}/chat/{s}/message?password={s}&limit={d}", .{ //&with=attachment", .{
         self.host,
         guid,
         self.password,
-        1000,
+        500,
     });
     defer self.alloc.free(chat_request);
     const url = try std.Uri.parse(chat_request);

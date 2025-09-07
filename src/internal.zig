@@ -117,6 +117,7 @@ pub const Chat = struct {
             next.deinit();
         }
         self.messages.deinit();
+        self.alloc.free(self.participants);
         self.alloc.destroy(self);
     }
 
@@ -132,14 +133,56 @@ pub const Chat = struct {
 };
 
 pub const Contact = struct {
+    alloc:          Allocator,
     display_name:   String,
     number:         String,
 
     pub fn init(alloc: Allocator, name: String, number: String) !Contact {
         return .{
+            .alloc = alloc,
             .display_name = try alloc.dupe(u8, name),
             .number = try alloc.dupe(u8, number),
         };
+    }
+
+    pub fn deinit(self: *Contact) void {
+        self.alloc.free(self.display_name);
+        self.alloc.free(self.number);
+    }
+
+    pub fn jsonParse(alloc: Allocator, source: anytype, options: std.json.ParseOptions) !Contact {
+        _ = options;
+        if (try source.next() != .object_begin) {
+            return error.UnexpectedToken;
+        }
+
+        var name: String = undefined;
+        var number: String = undefined;
+        var parsing = true;
+        while (parsing) {
+            switch (try source.next()) {
+                .object_end => parsing = false,
+                .string => |field| {
+                    if (std.mem.eql(u8, field, "display_name")) {
+                        name = (try source.nextAlloc(alloc, .alloc_always)).allocated_string;
+                    }
+                    else if (std.mem.eql(u8, field, "number")) {
+                        number = (try source.nextAlloc(alloc, .alloc_always)).allocated_string;
+                    }
+                },
+                .allocated_string => |field| {
+                    if (std.mem.eql(u8, field, "display_name")) {
+                        name = (try source.nextAlloc(alloc, .alloc_always)).allocated_string;
+                    }
+                    else if (std.mem.eql(u8, field, "number")) {
+                        number = (try source.nextAlloc(alloc, .alloc_always)).allocated_string;
+                    }
+                },
+                else => return error.UnexpectedToken,
+            }
+        }
+
+        return .{.alloc = alloc, .display_name = name, .number = number};
     }
 
     pub fn jsonStringify(self: *const Contact, jws: anytype) !void {

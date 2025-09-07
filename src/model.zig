@@ -31,15 +31,15 @@ const MessageType = union(enum) {
     Text:       vxfw.Text,
 };
 
-fn Label(alloc: std.mem.Allocator, from_me: bool, contact: *internal.Contact) MessageType {
+fn Label(from_me: bool, contact: *internal.Contact) MessageType {
     if (from_me == true) {
         return .{
-            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = alloc.dupe(u8, contact.display_name) catch "out of memory for me?", .text_align = .right},
+            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = contact.display_name, .text_align = .right},
         };
     }
     else {
         return .{
-            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = alloc.dupe(u8, contact.display_name) catch "out of memory for other?", .text_align = .left},
+            .Label = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = contact.display_name, .text_align = .left},
         };
     }
 }
@@ -177,8 +177,6 @@ pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
         }
         try self.messageAdd(message, needs_label, needs_time);
     }
-
-    // view cursor handled by message add
 }
 
 pub fn messageAdd(self: *Model, new_message: *internal.Message, needs_label: bool, needs_time: bool) !void {
@@ -188,7 +186,7 @@ pub fn messageAdd(self: *Model, new_message: *internal.Message, needs_label: boo
             const fmtRes = try new_message.date_time.formatAlloc(self.alloc, "MMM D - H:mm:ss");
             try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = fmtRes, .text_align = .center}});
         }
-        try self.messages_list.append(Label(self.alloc, new_message.from_me, new_message.contact));
+        try self.messages_list.append(Label(new_message.from_me, new_message.contact));
     }
 
     for (new_message.attachments) |attachment| {

@@ -54,7 +54,7 @@ const TypingNotice = struct {
             typing_event.* = .{.TypingStop = chat_guid};
             try self.queue.put(typing_event);
             self.active = false;
-            self.last = undefined;
+            self.last = 0;
         }
     }
 };

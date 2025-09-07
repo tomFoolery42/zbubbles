@@ -110,7 +110,12 @@ pub fn main() !void {
     const config = try config_load(alloc);
     defer config.deinit();
     var contacts = try contacts_load(alloc, config.value.contacts_file);
-    defer contacts.deinit();
+    defer {
+        for (contacts.items) |*next| {
+            next.deinit();
+        }
+        contacts.deinit();
+    }
 
     var interface = try ui.Ui.init(alloc, config.value.asset_path, &contacts, &ui_queue, &sync_queue);
     defer interface.deinit();
