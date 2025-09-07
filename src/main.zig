@@ -39,10 +39,16 @@ fn contacts_load(alloc: std.mem.Allocator, contacts_file: []const u8) !internal.
 
     const json = try file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
     defer alloc.free(json);
-    const list = try std.json.parseFromSliceLeaky([]internal.Contact, alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
-    errdefer alloc.free(list);
+    const list = try std.json.parseFromSlice([]internal.Contact, alloc, json, .{.allocate = .alloc_always, .ignore_unknown_fields = true});
+    defer list.deinit();
 
-    return internal.Contacts.fromOwnedSlice(alloc, list);
+    var contacts = internal.Contacts.init(alloc);
+    for (list.value) |next| {
+        const contact = try internal.Contact.init(alloc, next.display_name, next.number);
+        try contacts.append(contact);
+    }
+
+    return contacts;
 }
 
 fn webhook_listen(webhook: *Webhook) void {
@@ -111,7 +117,7 @@ pub fn main() !void {
     defer config.deinit();
     var contacts = try contacts_load(alloc, config.value.contacts_file);
     defer {
-        for (contacts.items) |*next| {
+        for (contacts.items) |next| {
             next.deinit();
         }
         contacts.deinit();

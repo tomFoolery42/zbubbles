@@ -4,27 +4,28 @@ const std = @import("std");
 const zig_time = @import("zig-time");
 
 const Allocator             = std.mem.Allocator;
-pub const Contacts          = std.ArrayList(Contact);
+pub const Contacts          = std.ArrayList(*Contact);
 pub const String            = []const u8;
 
 
 fn contactFind(alloc: Allocator, contacts: *Contacts, participant: schema.Handle) !*Contact {
-    for (contacts.items) |*next| {
+    for (contacts.items) |next| {
         if (std.mem.eql(u8, next.number, participant.address) == true) {
             return next;
         }
     }
 
     const display_name = if (participant.address.len > 0) participant.address else "invalid display name";
+    const contact = try Contact.init(alloc, display_name, participant.address);
+    try contacts.append(contact);
 
-    try contacts.append(try Contact.init(alloc, display_name, participant.address));
-    return &contacts.items[contacts.items.len - 1];
+    return contact;
 }
 
-fn find(alloc: Allocator, contacts: *Contacts, participants: []schema.Handle) ![]Contact {
-    var found_contacts = try alloc.alloc(Contact, participants.len);
+fn find(alloc: Allocator, contacts: *Contacts, participants: []schema.Handle) ![]*Contact {
+    var found_contacts = try alloc.alloc(*Contact, participants.len);
     for (participants, 0..) |participant, i| {
-        found_contacts[i] = (try contactFind(alloc, contacts, participant)).*;
+        found_contacts[i] = try contactFind(alloc, contacts, participant);
     }
 
     return found_contacts;
@@ -80,7 +81,7 @@ pub const Chat = struct {
     guid:           String,
     has_new:        bool,
     messages:       std.ArrayList(*Message),
-    participants:   []Contact,
+    participants:   []*Contact,
 
     pub fn init(alloc: Allocator, chat: schema.Chat, contacts: *Contacts) !*Chat {
         const participants = try find(alloc, contacts, chat.participants);
@@ -137,17 +138,21 @@ pub const Contact = struct {
     display_name:   String,
     number:         String,
 
-    pub fn init(alloc: Allocator, name: String, number: String) !Contact {
-        return .{
+    pub fn init(alloc: Allocator, name: String, number: String) !*Contact {
+        const self = try alloc.create(Contact);
+        self.* = .{
             .alloc = alloc,
             .display_name = try alloc.dupe(u8, name),
             .number = try alloc.dupe(u8, number),
         };
+
+        return self;
     }
 
     pub fn deinit(self: *Contact) void {
         self.alloc.free(self.display_name);
         self.alloc.free(self.number);
+        self.alloc.destroy(self);
     }
 
     pub fn jsonParse(alloc: Allocator, source: anytype, options: std.json.ParseOptions) !Contact {
@@ -212,7 +217,7 @@ pub const Message = struct {
 
     pub fn init(alloc: Allocator, message: schema.Message, chat_guid: String, contacts: *Contacts, attachments: []Attachment) !*Message {
         //first item in contacts is always me
-        var contact = &contacts.items[0];
+        var contact = contacts.items[0];
         if (message.handle) |handle| {
             if (message.isFromMe == false) {
                 contact = try contactFind(alloc, contacts, handle);

@@ -22,9 +22,11 @@ fn scale(max: u16, scaler: f32) u16 {
 }
 
 pub const Model = @This();
+const String = []const u8;
 
 const MessageType = union(enum) {
     Buffer:     vxfw.Text,
+    Date:       vxfw.Text,
     Image:      vxfw.Text,
     Label:      vxfw.Text,
     Reaction:   vxfw.Text,
@@ -43,7 +45,7 @@ fn Label(from_me: bool, contact: *internal.Contact) MessageType {
         };
     }
 }
-fn Text(from_me: bool, text: []const u8) MessageType {
+fn Text(from_me: bool, text: String) MessageType {
     if (from_me == true) {
         return .{
             .Text = .{.style = .{.bg = BLUE, .fg = WHITE}, .text = text, .text_align = .right},
@@ -92,6 +94,7 @@ chats_list:         std.ArrayList(vxfw.Text),
 chats_side_view:    vxfw.ListView,
 input:              vxfw.TextField,
 input_window:       vxfw.SplitView,
+messages_arena:     std.heap.ArenaAllocator,
 messages_list:      std.ArrayList(MessageType),
 messages_view:      vxfw.ListView,
 send:               vxfw.Button,
@@ -110,7 +113,8 @@ pub fn init(alloc: std.mem.Allocator) !*Model {
         .chats_side_view    = .{.children = .{.builder = vxfw.ListView.Builder{.userdata = model, .buildFn = Model.chatListBuilder}}},
         .input              = vxfw.TextField.init(alloc, ucd),
         .input_window       = .{.lhs = undefined, .rhs = undefined, .width = 50},
-        .messages_list      = try std.ArrayList(MessageType).initCapacity(alloc, 2000),
+        .messages_arena     = std.heap.ArenaAllocator.init(alloc),
+        .messages_list      = try std.ArrayList(MessageType).initCapacity(alloc, 500),
         .messages_view      = .{.children = .{.builder = .{.userdata = model, .buildFn = Model.messageListBuilder}}},
         .send               = .{.label = "Send", .onClick = undefined, .userdata = undefined, .style = .{.default = .{.bg = BLUE}}},
         .main_split         = .{.lhs = undefined, .rhs = undefined, .width = 30},
@@ -131,6 +135,7 @@ pub fn init(alloc: std.mem.Allocator) !*Model {
 pub fn deinit(self: *Model) void {
     self.chats_list.deinit();
     self.input.deinit();
+    self.messages_arena.deinit();
     self.messages_list.deinit();
     self.ucd.deinit(self.alloc);
     self.alloc.destroy(self.ucd);
@@ -162,11 +167,12 @@ pub fn resize(self: *Model, winsize: vaxis.Winsize) !void {
 }
 
 pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
+    _ = self.messages_arena.reset(.retain_capacity);
     self.messages_list.clearRetainingCapacity();
     try self.messages_list.ensureTotalCapacity(chat.messages.items.len);
 
     for (chat.messages.items, 0..chat.messages.items.len) |message, index| {
-        var last_message_sender: []const u8 = "";
+        var last_message_sender: String = "";
         var needs_label = true;
         var needs_time = true;
         if (index > 0) {
@@ -180,11 +186,12 @@ pub fn mainChatRebuild(self: *Model, chat: *internal.Chat) !void {
 }
 
 pub fn messageAdd(self: *Model, new_message: *internal.Message, needs_label: bool, needs_time: bool) !void {
+    const alloc = self.messages_arena.allocator();
     if (needs_label == true) {
         try self.messages_list.append(Buffer());
         if (needs_time == true) {
-            const fmtRes = try new_message.date_time.formatAlloc(self.alloc, "MMM D - H:mm:ss");
-            try self.messages_list.append(.{.Text = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = fmtRes, .text_align = .center}});
+            const fmtRes = try new_message.date_time.formatAlloc(alloc, "MMM D - H:mm:ss");
+            try self.messages_list.append(.{.Date = .{.style = .{.bg = BLACK, .fg = WHITE}, .text = fmtRes, .text_align = .center}});
         }
         try self.messages_list.append(Label(new_message.from_me, new_message.contact));
     }
@@ -196,7 +203,6 @@ pub fn messageAdd(self: *Model, new_message: *internal.Message, needs_label: boo
 
     try self.messages_list.append(Text(new_message.from_me, new_message.text));
 
-
     self.messages_view.cursor = @intCast(self.messages_list.items.len - 1);
     self.messages_view.ensureScroll();
 }
@@ -207,6 +213,7 @@ fn messageListBuilder(ptr: *const anyopaque, idx: usize, _: usize) ?vxfw.Widget 
 
     return switch (self.messages_list.items[idx]) {
         .Buffer     => |*buffer| buffer.widget(),
+        .Date       => |*date| date.widget(),
         .Image      => |*image| image.widget(),
         .Label      => |*label| label.widget(),
         .Reaction   => |*reaction| reaction.widget(),

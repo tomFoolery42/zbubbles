@@ -11,18 +11,15 @@ lhs: vxfw.Widget,
 rhs: vxfw.Widget,
 constrain: enum { lhs, rhs } = .lhs,
 style: vaxis.Style = .{},
-/// min width for the constrained side
+/// min height for the constrained side
 min_height: u16 = 0,
-/// max width for the constrained side
+/// max height for the constrained side
 max_height: ?u16 = null,
-/// Target width to draw at
+/// Target height to draw at
 height: u16,
 
 /// Used to calculate mouse events when our constraint is rhs
 last_max_height: ?u16 = null,
-
-/// Statically allocated children
-children: [2]vxfw.SubSurface = undefined,
 
 // State
 pressed: bool = false,
@@ -79,7 +76,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
         try ctx.setMouseShape(.default);
     }
 
-    // If pressed, we always keep the mouse shape and we update the width
+    // If pressed, we always keep the mouse shape and we update the height
     if (self.pressed) {
         try ctx.setMouseShape(.@"ew-resize");
         switch (self.constrain) {
@@ -105,11 +102,11 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) Allocator.Error!vxfw
     const self: *VirticalView = @ptrCast(@alignCast(ptr));
     // Fills entire space
     const max = ctx.max.size();
-    // Constrain width to the max
+    // Constrain height to the max
     self.height = @min(self.height, max.height);
     self.last_max_height = max.height;
 
-    // The constrained side is equal to the width
+    // The constrained side is equal to the height
     const constrained_min: vxfw.Size = .{ .width = max.width, .height = self.height };
     const constrained_max = vxfw.MaxSize.fromSize(constrained_min);
 
@@ -164,7 +161,7 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) Allocator.Error!vxfw
                 const rhs_surface = try self.rhs.draw(rhs_ctx);
                 children.appendAssumeCapacity(.{
                     .surface = rhs_surface,
-                    .origin = .{ .row = unconstrained_max.height.? + 1, .col = 0 },
+                    .origin = .{ .row = 0, .col = unconstrained_max.height.? + 1 },
                 });
             }
             var surface = try vxfw.Surface.initWithChildren(
@@ -211,17 +208,17 @@ test VirticalView {
     const split_widget = split_view.widget();
     {
         const surface = try split_widget.draw(draw_ctx);
-        // SplitView expands to fill the space
+        // VirticalView expands to fill the space
         try std.testing.expectEqual(@as(vxfw.Size, .{ .width = 16, .height = 16 }), surface.size);
         // It has two children
         try std.testing.expectEqual(2, surface.children.len);
-        // The left child should have a width = SplitView.width
+        // The left child should have a height = VirticalView.height
         try std.testing.expectEqual(split_view.width, surface.children[0].surface.size.width);
     }
 
     // Send the widget a mouse press on the separator
     var mouse: vaxis.Mouse = .{
-        // The separator is width + 1
+        // The separator is at height
         .col = split_view.width + 1,
         .row = 0,
         .type = .press,
@@ -238,7 +235,7 @@ test VirticalView {
     try std.testing.expect(ctx.redraw);
     try std.testing.expect(split_view.pressed);
 
-    // If we move the mouse, we should update the width
+    // If we move the mouse, we should update the height
     mouse.col = 2;
     mouse.type = .drag;
     try split_widget.handleEvent(&ctx, .{ .mouse = mouse });
